@@ -1342,9 +1342,9 @@ void main(){ vec3 P=aR; vec3 M=aM; int b=int(aCell+0.5); int fl=int(aM.y+0.5);
   vWp=P; vN=aRN; vR=aR; vM=M; vRN=aRN; vLin=-(G.view*vec4(P,1.0)).z; gl_Position=G.viewProj*vec4(P,1.0); }
 #elif defined(TREE)
 // street and park trees, instanced: a trunk and a crown; they lean away from the dinosaur and splat when stomped, then wobble back
-uniform sampler2D treeTex;
+uniform sampler2D treeTex; uniform float uTG; // uTG: crown scale for the thinned far trees (1 elsewhere)
 layout(location=0) in vec3 aP; layout(location=1) in float aPart; layout(location=5) in vec4 aI; layout(location=6) in vec2 aJ;
-void main(){ float Ht=aI.z, R=aI.w; bool con=aJ.x>0.5&&aJ.x<1.5; bool cherry=aJ.x>1.5; int id=int(aJ.y+0.5);
+void main(){ float Ht=aI.z, R=aI.w*(uTG>0.0?uTG:1.0); bool con=aJ.x>0.5&&aJ.x<1.5; bool cherry=aJ.x>1.5; int id=int(aJ.y+0.5);
   float cb=max(Ht*0.38,Ht-2.0*R); float ry=max((Ht-cb)*0.5,R*0.5); float cy=cb+ry;
   vec3 lp, ln;
   if(aPart<0.5){ float rt=max(0.005,R*0.11); lp=vec3(aP.x*rt,(aP.y*0.5+0.5)*cy,aP.z*rt); ln=normalize(vec3(aP.x/rt,aP.y/(cy*0.5),aP.z/rt)); }
@@ -1598,7 +1598,7 @@ function drawStatics(p){ if(HIDE.static) return; const m=CAM.vp; let n=0; for(co
 
 // ---------------- trees: DC's tree inventory, instanced ----------------
 const TREES={n:0, grid:new Map(), stomp:null, dirty:false, tiles:[]};
-const TREE_TILE=4, TREE_FAR=9, TREE_SUPER=16, TREE_CUT=45;
+const TREE_TILE=4, TREE_FAR=9, TREE_SUPER=16, TREE_CUT=45, TREE_THIN_MIN=0.12; // past TREE_CUT: thinned octahedron crowns, scaled up to keep the canopy, all the way to the edge
 function initTrees(){ const T=CITY.trees, Qd=CITY.Q, n0=T.length/5;
   // sort the trees into tiles, so each tile is one instanced draw that can be culled and drawn at its own detail
   // tiles inside 16-unit super-tiles, contiguous, so a far super-tile is one draw
@@ -1614,7 +1614,13 @@ function initTrees(){ const T=CITY.trees, Qd=CITY.Q, n0=T.length/5;
     S.count+=t.count; S.tiles.push(t); const b=S.box; b[0]=Math.min(b[0],t.box[0]); b[2]=Math.min(b[2],t.box[2]); b[3]=Math.max(b[3],t.box[3]); b[5]=Math.max(b[5],t.box[5]); b[4]=Math.max(b[4],t.box[4]); }
   const ib=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,ib); gl.bufferData(gl.ARRAY_BUFFER,I,gl.STATIC_DRAW);
   const jb=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,jb); gl.bufferData(gl.ARRAY_BUFFER,J,gl.STATIC_DRAW);
-  const mk=(crownSub,trunk)=>{ const crown=icosphere(crownSub), tk=icosphere(0); const parts=trunk?[[tk,0],[crown,1]]:[[crown,1]]; let nv=0; for(const [m] of parts) nv+=m.pos.length/3;
+  // the far copy: each super-tile's trees shuffled, so drawing the first part of a super-tile is an even thinning (ids kept, so stomps still show)
+  const I2=new Float32Array(I), J2=new Float32Array(J), rnd=mulberry(29);
+  for(const S of TREES.supers) for(let a=S.start+S.count-1;a>S.start;a--){ const b=S.start+Math.floor(rnd()*(a-S.start+1)); for(let c=0;c<4;c++){ const t=I2[a*4+c]; I2[a*4+c]=I2[b*4+c]; I2[b*4+c]=t; } for(let c=0;c<2;c++){ const t=J2[a*2+c]; J2[a*2+c]=J2[b*2+c]; J2[b*2+c]=t; } }
+  const ib2=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,ib2); gl.bufferData(gl.ARRAY_BUFFER,I2,gl.STATIC_DRAW);
+  const jb2=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,jb2); gl.bufferData(gl.ARRAY_BUFFER,J2,gl.STATIC_DRAW);
+  const octa={pos:[1,0,0,-1,0,0,0,1,0,0,-1,0,0,0,1,0,0,-1], idx:[0,2,4, 4,2,1, 1,2,5, 5,2,0, 4,3,0, 1,3,4, 5,3,1, 0,3,5]};
+  const mk=(crownSub,trunk,ib,jb,crownMesh=null)=>{ const crown=crownMesh||icosphere(crownSub), tk=icosphere(0); const parts=trunk?[[tk,0],[crown,1]]:[[crown,1]]; let nv=0; for(const [m] of parts) nv+=m.pos.length/3;
     const V=new Float32Array(nv*4); const idx=[]; let o=0, base=0; for(const [m,part] of parts){ for(let v=0;v<m.pos.length/3;v++){ V.set([m.pos[v*3],m.pos[v*3+1],m.pos[v*3+2],part],o); o+=4; } for(const q of m.idx) idx.push(q+base); base+=m.pos.length/3; }
     const vao=gl.createVertexArray(); gl.bindVertexArray(vao);
     const vb=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,vb); gl.bufferData(gl.ARRAY_BUFFER,V,gl.STATIC_DRAW); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,3,gl.FLOAT,false,16,0); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1,1,gl.FLOAT,false,16,12);
@@ -1622,7 +1628,7 @@ function initTrees(){ const T=CITY.trees, Qd=CITY.Q, n0=T.length/5;
     gl.bindBuffer(gl.ARRAY_BUFFER,jb); gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6,2,gl.FLOAT,false,8,0); gl.vertexAttribDivisor(6,1);
     const eb=gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,eb); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint32Array(idx),gl.STATIC_DRAW); gl.bindVertexArray(null);
     return {vao,n:idx.length}; };
-  RG.trees={near:mk(1,true), far:mk(0,false), ib, jb};
+  RG.trees={near:mk(1,true,ib,jb), far:mk(0,false,ib,jb), xfar:mk(0,false,ib2,jb2,octa), ib, jb, ib2, jb2};
   RG.treeRows=Math.max(1,Math.ceil(n/TEXW)); TREES.stomp=new Float32Array(TEXW*RG.treeRows).fill(-100);
   RG.treeTex=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,RG.treeTex); gl.texStorage2D(gl.TEXTURE_2D,1,gl.R32F,TEXW,RG.treeRows); texParams(gl.NEAREST); TREES.dirty=true; }
 function treesNear(x,z,r,fn){ for(let i=Math.floor(x-r);i<=Math.floor(x+r);i++) for(let k=Math.floor(z-r);k<=Math.floor(z+r);k++){ const L=TREES.grid.get(i+','+k); if(!L) continue;
@@ -1632,12 +1638,17 @@ function stompTrees(x,z,r){ treesNear(x,z,r,(t,d)=>{ if(SIMT-TREES.stomp[t]>3){ 
         for(let k=0;k<9&&PUFFS.length<320;k++){ const a=Math.random()*6.283, rr=Math.random()*cr; PUFFS.push({p:[I[t*4]+Math.cos(a)*rr,h*(0.6+0.3*Math.random()),I[t*4+1]+Math.sin(a)*rr], v:[Math.cos(a)*0.4,0.5+Math.random()*0.6,Math.sin(a)*0.4], r:0.008+Math.random()*0.009, life:4+Math.random()*2.5, t:0, col:[1.0,0.62,0.8], petal:Math.random()*6.283}); } } } }); }
 function drawTrees(){ if(HIDE.trees) return; const m=CAM.vp, e=CAM.eye, T=RG.trees; let drawn=0; const near=[], far=[], farTiles=[];
   const dist=b=>Math.hypot(Math.max(b[0]-e[0],0,e[0]-b[3]), Math.max(b[2]-e[2],0,e[2]-b[5]), e[1]*0.5);
-  for(const S of TREES.supers){ const ds=dist(S.box); if(ds>TREE_CUT||!boxVisible(m,S.box)) continue;
+  const xfar=[];
+  for(const S of TREES.supers){ const ds=dist(S.box); if(!boxVisible(m,S.box)) continue; if(ds>TREE_CUT){ xfar.push([S,Math.max(TREE_THIN_MIN,(TREE_CUT/ds)**2)]); continue; }
     if(ds>TREE_FAR) far.push(S); else for(const t of S.tiles){ if(!boxVisible(m,t.box)) continue; (dist(t.box)>TREE_FAR?farTiles:near).push(t); } }
   const draw=(lod,list)=>{ gl.bindVertexArray(lod.vao); for(const t of list){ gl.bindBuffer(gl.ARRAY_BUFFER,T.ib); gl.vertexAttribPointer(5,4,gl.FLOAT,false,16,t.start*16); gl.bindBuffer(gl.ARRAY_BUFFER,T.jb); gl.vertexAttribPointer(6,2,gl.FLOAT,false,8,t.start*8);
       gl.drawElementsInstanced(gl.TRIANGLES,lod.n,gl.UNSIGNED_INT,0,t.count); drawn+=t.count; } };
-  draw(T.near,near); draw(T.far,farTiles); draw(T.far,far);
-  STATS.treesDrawn=drawn; }
+  const prog=gl.getParameter(gl.CURRENT_PROGRAM), uTG=prog&&(prog._uTG!==undefined?prog._uTG:(prog._uTG=gl.getUniformLocation(prog,'uTG')));
+  if(uTG) gl.uniform1f(uTG,1.0); draw(T.near,near); draw(T.far,farTiles); draw(T.far,far);
+  gl.bindVertexArray(T.xfar.vao); for(const [S,f] of xfar){ const c=Math.ceil(S.count*f); if(uTG) gl.uniform1f(uTG,Math.min(2.4,1/Math.sqrt(f)));
+    gl.bindBuffer(gl.ARRAY_BUFFER,T.ib2); gl.vertexAttribPointer(5,4,gl.FLOAT,false,16,S.start*16); gl.bindBuffer(gl.ARRAY_BUFFER,T.jb2); gl.vertexAttribPointer(6,2,gl.FLOAT,false,8,S.start*8);
+    gl.drawElementsInstanced(gl.TRIANGLES,T.xfar.n,gl.UNSIGNED_INT,0,c); drawn+=c; }
+  STATS.treesDrawn=drawn; STATS.treesFar=xfar.length; }
 
 // ---------------- cars: stylised jelly cars parked at the curbs of the real streets (no makes or models) ----------------
 const CARS={list:[], lanes:[], inst:null, n:0};
@@ -1656,7 +1667,7 @@ function initCars(){
   for(const L of CITY.lanes){ const p=L.p, n=p.length/2; if(n<2) continue; const cum=[0]; for(let i=1;i<n;i++) cum.push(cum[i-1]+Math.hypot(p[i*2]-p[i*2-2],p[i*2+1]-p[i*2-1]));
     if(cum[n-1]<0.05) continue; const id=CARS.lanes.length; CARS.lanes.push({p,cum,len:cum[n-1],n:L.n}); }
   CARS.roadG=polyIndex(CITY.roads,r=>r.rings); CARS.bldG=polyIndex(CITYB,R=>R.rings);
-  const N=Math.min(2400,Math.round(CARS.lanes.length*0.5)); const rnd=mulberry(11);
+  const N=Math.min(3500,Math.round(CARS.lanes.length*0.5)); const rnd=mulberry(11);
   for(let i=0;i<N;i++){ const c={col:21+(i%3), mode:'park', p:[0,0,0], v:[0,0,0], q:[0,0,0,1], w:[0,0,0], sq:0, sqv:0, t:0, scale:1}; placeCar(c,rnd); CARS.list.push(c); }
   CARS.n=N; CARS.inst=new Float32Array(N*12);
   const vao=gl.createVertexArray(); gl.bindVertexArray(vao);
@@ -1681,6 +1692,7 @@ function placeCar(c,rnd,awayFrom){ const half=0.5*CAR_SCALE, hw=0.21*CAR_SCALE, 
     const [x,z,tx,tz]=lanePoint(L,dist); const side=rnd()<0.5?1:-1; const nx=-tz*side, nz=tx*side;
     if(!onRoad(x,z)) continue; let d=0; while(d<30/60 && onRoad(x+nx*(d+step),z+nz*(d+step))) d+=step; if(d>=30/60||d<4/60) continue;
     const off=d-hw-0.6/60; const px=x+nx*off, pz=z+nz*off;
+    if(!onRoad(px,pz)) continue; // the car's own centre on the road too, not just the curb point it was found from
     let ok=true; for(const [a,b] of [[1,1],[1,-1],[-1,1],[-1,-1],[0,1],[0,-1]]){ const cx=px+tx*half*a-nx*hw*b, cz=pz+tz*half*a-nz*hw*b; if(inBld(cx,cz)){ ok=false; break; } } if(!ok) continue;
     for(const o of CARS.list){ if(o!==c && o.mode!=='wreck' && Math.hypot(o.p[0]-px,o.p[2]-pz)<CAR_SCALE*1.25){ ok=false; break; } } if(!ok) continue;
     if(awayFrom && Math.hypot(px-awayFrom[0],pz-awayFrom[1])<6) continue;
