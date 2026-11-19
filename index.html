@@ -1251,7 +1251,7 @@ function crushStomp(cx,cz,r){ for(const R of CRUSH_NEAR) if(!R.crushed && bldDis
 // scale = DS0 * (1 + 4 * (1 - exp(-mass / GROW.M))). Mass is the volume of jelly torn off (cubic units), plus a little
 // per car and a bonus per landmark, divided by the dinosaur's own volume (DS^3). The dinosaur's lattice keeps its nodes at
 // any size, so growing rescales it in place.
-const GROW={mass:0, M:45, target:DS0};
+const GROW={mass:0, M:22.5, target:DS0}; // M was 45 until 2026-11-19; halving it halves the destruction needed for every size
 function absorb(amount){ GROW.mass+=amount/(DS*DS*DS); // food counts relative to the dinosaur's own volume, so a bigger dinosaur needs bigger meals
   GROW.target=Math.min(DS_MAX,DS0*(1+4*(1-Math.exp(-GROW.mass/GROW.M)))); STATS.absorbed=+(GROW.mass).toFixed(4); }
 // the visible part: blobs of the destroyed jelly fly into the dinosaur, and it pulses as each one lands
